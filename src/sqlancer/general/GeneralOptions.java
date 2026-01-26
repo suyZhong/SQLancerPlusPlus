@@ -107,11 +107,6 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
     public enum GeneralDatabaseEngineFactory implements DatabaseEngineFactory<GeneralGlobalState> {
         CRATE {
             @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:postgresql://localhost:10004/?user=crate");
-            }
-
-            @Override
             public void syncData(GeneralGlobalState globalState) throws SQLException {
                 for (GeneralTable table : globalState.getSchema().getDatabaseTablesWithoutViews()) {
                     try (Statement s = globalState.getConnection().createStatement()) {
@@ -123,32 +118,10 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
                 }
             }
         },
-        FIREBIRD {
-
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:firebirdsql://localhost:10009//app/default?user=SYSDBA&password=masterkey");
-            }
-
-        },
-        MYSQL {
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:mysql://localhost:23306/?user=root&password=root");
-            }
-        },
-        DOLT {
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:mysql://localhost:10007/?user=root");
-            }
-        },
+        FIREBIRD,
+        MYSQL,
+        DOLT,
         RISINGWAVE {
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:postgresql://localhost:10008/dev?user=root");
-            }
-
             @Override
             public Connection cleanOrSetUpDatabase(GeneralGlobalState globalState, String databaseName)
                     throws SQLException {
@@ -183,11 +156,16 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
                 }
             }
         },
+        // Special case: file-based database with system property support
         DUCKDB {
             @Override
             public String getJDBCString(GeneralGlobalState globalState) {
-                String databaseFile = System.getProperty("duckdb.database.file", "");
-                return String.format("jdbc:duckdb:" + databaseFile);
+                // Allow system property override for database file path
+                String dbFile = System.getProperty("duckdb.database.file");
+                if (dbFile != null) {
+                    return "jdbc:duckdb:" + dbFile;
+                }
+                return GeneralJdbcConfigLoader.getProperty(name(), "url");
             }
 
             @Override
@@ -197,11 +175,6 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
             }
         },
         POSTGRESQL {
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:postgresql://localhost:10010/?user=postgres&password=postgres");
-            };
-
             @Override
             public Connection cleanOrSetUpDatabase(GeneralGlobalState globalState, String databaseName)
                     throws SQLException {
@@ -226,11 +199,6 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
         },
         COCKROACHDB {
             @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:postgresql://localhost:10011/?user=root");
-            }
-
-            @Override
             public Connection cleanOrSetUpDatabase(GeneralGlobalState globalState, String databaseName)
                     throws SQLException {
                 Connection conn = DriverManager.getConnection(getJDBCString(globalState));
@@ -252,16 +220,13 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
                 return conn;
             }
         },
-        TIDB {
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:mysql://localhost:10013/?user=root");
-            }
-        },
+        TIDB,
+        // Special case: file-based in-memory database with dynamic database name
         SQLITE {
             @Override
             public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:sqlite:file:%s?mode=memory&cache=private", globalState.getDatabaseName());
+                return GeneralJdbcConfigLoader.getProperty(name(), "url")
+                        .replace("{dbname}", globalState.getDatabaseName());
             }
 
             @Override
@@ -271,11 +236,6 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
             }
         },
         UMBRA {
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:postgresql://localhost:10015/?user=postgres&password=postgres");
-            }
-
             @Override
             public Connection cleanOrSetUpDatabase(GeneralGlobalState globalState, String databaseName)
                     throws SQLException {
@@ -298,43 +258,12 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
                 return conn;
             }
         },
-        MARIADB {
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:mariadb://localhost:10016/?user=root&password=root");
-            }
-        },
-        IMMUDB {
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format(
-                        "jdbc:postgresql://localhost:10017/defaultdb?sslmode=allow&preferQueryMode=simple&user=immudb&password=immudb");
-            }
-        },
-        QUESTDB {
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:postgresql://localhost:10018/?user=admin&password=quest");
-            }
-        },
-        PERCONA {
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:mysql://localhost:10022/?user=root&password=root");
-            }
-        },
-        VIRTUOSO {
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:virtuoso://localhost:10020/UID=dba/PWD=dba");
-            }
-        },
+        MARIADB,
+        IMMUDB,
+        QUESTDB,
+        PERCONA,
+        VIRTUOSO,
         MONETDB {
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:monetdb://localhost:10021/monetdb?user=monetdb&password=monetdb");
-            }
-
             @Override
             public Connection cleanOrSetUpDatabase(GeneralGlobalState globalState, String databaseName)
                     throws SQLException {
@@ -353,10 +282,12 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
                 return conn;
             }
         },
+        // Special case: file-based database with dynamic database name
         H2 {
             @Override
             public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:h2:./databases/h2/%s;DB_CLOSE_ON_EXIT=FALSE", globalState.getDatabaseName());
+                return GeneralJdbcConfigLoader.getProperty(name(), "url")
+                        .replace("{dbname}", globalState.getDatabaseName());
             }
 
             @Override
@@ -370,11 +301,6 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
             }
         },
         CLICKHOUSE {
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:clickhouse://localhost:10023/default");
-            }
-
             @Override
             public Connection cleanOrSetUpDatabase(GeneralGlobalState globalState, String databaseName)
                     throws SQLException {
@@ -395,11 +321,6 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
             }
         },
         VITESS {
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:mysql://localhost:10027/?user=root");
-            }
-
             @Override
             public Connection cleanOrSetUpDatabase(GeneralGlobalState globalState, String databaseName)
                     throws SQLException {
@@ -429,11 +350,6 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
         },
         PRESTO {
             @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:presto://localhost:10028/memory?user=test");
-            }
-
-            @Override
             public Connection cleanOrSetUpDatabase(GeneralGlobalState globalState, String databaseName)
                     throws SQLException {
                 Connection conn = DriverManager.getConnection(getJDBCString(globalState));
@@ -462,18 +378,8 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
                 return conn;
             }
         },
-        ORACLE {
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:oracle:thin:myuser/mypassword@//localhost:10033/FREEPDB1");
-            }
-        },
+        ORACLE,
         CEDARDB {
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:postgresql://localhost:10029/?user=postgres&password=postgres");
-            }
-
             @Override
             public Connection cleanOrSetUpDatabase(GeneralGlobalState globalState, String databaseName)
                     throws SQLException {
@@ -496,14 +402,22 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
                 return conn;
             }
         },
-        OCEANBASE {
-            @Override
-            public String getJDBCString(GeneralGlobalState globalState) {
-                return String.format("jdbc:mysql://localhost:10031/?user=root");
-            }
-        };
+        OCEANBASE;
 
         private boolean isNewSchema = true;
+
+        /**
+         * Default implementation that builds JDBC URL from configuration file.
+         * Special cases (SQLITE, DUCKDB, H2) should override this method.
+         */
+        @Override
+        public String getJDBCString(GeneralGlobalState globalState) {
+            String url = GeneralJdbcConfigLoader.buildJdbcUrl(name(), globalState.getOptions());
+            if (globalState.getOptions().debugLogs()) {
+                System.out.println("Connecting to " + url);
+            }
+            return url;
+        }
 
         @Override
         public boolean isNewSchema() {
