@@ -12,3 +12,5 @@ SQLancer.iml
 dependency-reduced-pom.xml
 database0.db
 databaseconnectiontest.db
+logs/*
+!logs/.gitkeep
