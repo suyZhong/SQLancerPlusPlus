@@ -197,6 +197,7 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
                 return conn;
             }
         },
+        MATERIALIZE,
         COCKROACHDB {
             @Override
             public Connection cleanOrSetUpDatabase(GeneralGlobalState globalState, String databaseName)
