@@ -24,18 +24,11 @@ If the execution prints progress information every five seconds, then the tool w
 
 ## Adapt SQLancer++ to custom DBMSs
 
-Ideally, you should be able to adapt SQLancer++ to your custom DBMS by implementing the methods in `general/GeneralOptions.java`. For example, to test PostgreSQL, at least need to override the `getJDBCString` method.
+To add support for a new DBMS:
 
-```Java
-//...
-POSTGRESQL {
-    @Override
-    public String getJDBCString(GeneralGlobalState globalState) {
-        return String.format("jdbc:postgresql://localhost:10010/?user=postgres&password=postgres");
-    }
-},
-//...
-```
+1. **Add an enum** in `GeneralDatabaseEngineFactory` inside `GeneralOptions.java` (e.g., `MYDBMS`).
+2. **Configure JDBC** in `dbconfigs/jdbc.properties`: supply a URL template and default connection properties for your engine (with placeholders `{host}`, `{port}`, `{user}`, `{password}`).
+3. **Optional:** Provide DBMS-specific environment setup or custom initialization by overriding `cleanOrSetUpDatabase` in the enum if your system needs more than the default database creation and table cleanup logic (see `COCKROACHDB` for an example).
 
 By default, SQLancer++ will use `cleanOrSetUpDatabase` method to create a clean space for tables after connecting to the system by using above JDBC String. It will first try to `CREATE DATABASE` and `USE` it (like in MySQL). If it fails, it will try to blindly use `DROP TABLE` to clean all the possible tables.
 
@@ -46,13 +39,12 @@ The general workflow of SQLancer++ is as follows:
 
 ## Steps
 
-1. Add a new Enum object `$DBMS` in the `GeneralDatabaseEngineFactory` class in `GeneralOptions.java`  and implement `getJDBCString` method. Create the JAR by `mvn package -DskipTests`
+1. Add a new enum value `$DBMS` in `GeneralDatabaseEngineFactory` (`GeneralOptions.java`) and add the corresponding entries in `dbconfigs/jdbc.properties`. Build with `mvn package -DskipTests`.
 2. Start your DBMS instance.
-3. Begin testing by executing below command:
-    `java -jar target/sqlancer-2.0.0.jar --use-reducer general  --database-engine $DBMS`
-4. Check `logs/general` or the direct shell output to see if there are any bugs.
-    - `*-cur.log`: logs of all the statements executed
-    - `*.log`: logs of the statements triggered a potential bug (after reducing if `--use-reducer` is enabled)
+3. Run: `java -jar target/sqlancer-2.0.0.jar --use-reducer general --database-engine $DBMS`
+4. Check `logs/general` or the shell output for bugs.
+   - `*-cur.log`: all executed statements
+   - `*.log`: statements that triggered a potential bug (reduced if `--use-reducer` is enabled)
 
 ## Arguments
 
