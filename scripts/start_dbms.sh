@@ -205,3 +205,9 @@ if [ "$dbms" == "oceanbase" ]; then
 
 
 fi
+
+if [ "$dbms" == "materialize" ]; then
+    docker stop materialize-test
+    docker rm materialize-test
+    docker run --name materialize-test -p 6875:6875 -p 6876:6876 materialize/materialized:latest
+fi
