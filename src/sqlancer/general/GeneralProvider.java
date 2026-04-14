@@ -245,12 +245,18 @@ public class GeneralProvider extends SQLProviderAdapter<GeneralProvider.GeneralG
             try {
                 success = super.executeStatement(q, fills);
             } catch (Exception e) {
-                handler.appendScoreToTable(false, false);
+                handler.appendScoreToTable(false, false, q.getUnterminatedQueryString(), e.getMessage());
                 getLogger().writeCurrent(" -- " + e.getMessage());
                 throw e;
             }
-            // I guess we want to make sure if the syntax is correct
-            handler.appendScoreToTable(success, false, q.getUnterminatedQueryString());
+            if (!success) {
+                // The error was an expected error caught inside SQLQueryAdapter.execute().
+                String errorMsg = (q instanceof SQLQueryAdapter)
+                        ? ((SQLQueryAdapter) q).getLastErrorMessage() : null;
+                handler.appendScoreToTable(false, false, q.getUnterminatedQueryString(), errorMsg);
+            } else {
+                handler.appendScoreToTable(true, false, q.getUnterminatedQueryString());
+            }
             return success;
         }
 
@@ -293,6 +299,8 @@ public class GeneralProvider extends SQLProviderAdapter<GeneralProvider.GeneralG
                     handler.printStatistics();
                 }
                 handler.saveStatistics(this);
+                handler.dumpFeatureStatistics(this);
+                handler.dumpCompositeExamples(this);
                 if (handler.getCurDepth(databaseName) < getOptions().getMaxExpressionDepth()) {
                     handler.incrementCurDepth(databaseName);
                 }

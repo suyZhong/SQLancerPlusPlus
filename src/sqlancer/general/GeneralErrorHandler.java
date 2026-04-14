@@ -56,6 +56,14 @@ public class GeneralErrorHandler implements ErrorHandler {
     private static volatile Map<String, String> compositeExample = new HashMap<>();
     private static volatile Map<GeneralFragmentChoice, String> fragmentExample = new HashMap<>();
 
+    private static volatile Map<GeneratorNode, String> generatorErrorExample = new HashMap<>();
+    private static volatile Map<String, String> compositeErrorExample = new HashMap<>();
+    private static volatile Map<GeneralFragmentChoice, String> fragmentErrorExample = new HashMap<>();
+
+    private static volatile Map<GeneratorNode, String> generatorErrorMessage = new HashMap<>();
+    private static volatile Map<String, String> compositeErrorMessage = new HashMap<>();
+    private static volatile Map<GeneralFragmentChoice, String> fragmentErrorMessage = new HashMap<>();
+
     private double nodeNum = GeneratorNode.values().length;
 
     private final GeneratorInfoTable generatorTable;
@@ -473,11 +481,22 @@ public class GeneralErrorHandler implements ErrorHandler {
         return generatorTable.getLastGeneratorScore();
     }
 
-    public void appendScoreToTable(boolean status, boolean isQuery, String sql) {
+    public void appendScoreToTable(boolean status, boolean isQuery, String sql, String errorMessage) {
         if (status) {
             setExample(generatorInfo, sql);
+        } else {
+            if (sql != null) {
+                setErrorExample(generatorInfo, sql);
+            }
+            if (errorMessage != null) {
+                setErrorMessage(generatorInfo, errorMessage);
+            }
         }
         appendScoreToTable(status, isQuery);
+    }
+
+    public void appendScoreToTable(boolean status, boolean isQuery, String sql) {
+        appendScoreToTable(status, isQuery, sql, null);
     }
 
     public void appendScoreToTable(boolean status, boolean isQuery) {
@@ -683,6 +702,259 @@ public class GeneralErrorHandler implements ErrorHandler {
             if (!fragmentExample.containsKey(entry.getKey())) {
                 fragmentExample.put(entry.getKey(), sql);
             }
+        }
+    }
+
+    public void setErrorExample(GeneratorInfo info, String sql) {
+        for (Map.Entry<GeneratorNode, Integer> entry : info.getGeneratorScore().entrySet()) {
+            generatorErrorExample.put(entry.getKey(), sql);
+        }
+        for (Map.Entry<String, Integer> entry : info.getCompositeGeneratorScore().entrySet()) {
+            compositeErrorExample.put(entry.getKey(), sql);
+        }
+        for (Map.Entry<GeneralFragmentChoice, Integer> entry : info.getFragmentScore().entrySet()) {
+            fragmentErrorExample.put(entry.getKey(), sql);
+        }
+    }
+
+    public void setErrorMessage(GeneratorInfo info, String message) {
+        for (Map.Entry<GeneratorNode, Integer> entry : info.getGeneratorScore().entrySet()) {
+            generatorErrorMessage.put(entry.getKey(), message);
+        }
+        for (Map.Entry<String, Integer> entry : info.getCompositeGeneratorScore().entrySet()) {
+            compositeErrorMessage.put(entry.getKey(), message);
+        }
+        for (Map.Entry<GeneralFragmentChoice, Integer> entry : info.getFragmentScore().entrySet()) {
+            fragmentErrorMessage.put(entry.getKey(), message);
+        }
+    }
+
+    public synchronized void dumpFeatureStatistics(GeneralGlobalState globalState) {
+        String engineName = globalState.getDbmsSpecificOptions().getDatabaseEngineFactory().toString();
+        String filePath = "logs/" + engineName + "-feature-stats.log";
+
+        try (FileWriter writer = new FileWriter(filePath)) {
+            writer.write("=".repeat(80) + "\n");
+            writer.write(String.format("Feature Statistics Report — %s (Iteration #%d)\n", engineName, execDatabaseNum));
+            writer.write("=".repeat(80) + "\n\n");
+
+            // Summary
+            int totalNodes = allNodeCount.values().stream().mapToInt(Integer::intValue).sum();
+            int totalNodeSuccess = allNodeSuccess.values().stream().mapToInt(Integer::intValue).sum();
+            int enabledNodes = (int) generatorOptions.values().stream().filter(v -> v).count();
+            int totalGeneratorOptions = generatorOptions.size();
+            writer.write("--- Summary ---\n");
+            writer.write(String.format("  Total executions tracked:    %d\n", totalNodes));
+            writer.write(String.format("  Total successful:            %d\n", totalNodeSuccess));
+            writer.write(String.format("  Generator nodes enabled:     %d / %d\n", enabledNodes, totalGeneratorOptions));
+
+            int enabledComposites = (int) compositeGeneratorOptions.values().stream().filter(v -> v).count();
+            int totalComposites = compositeGeneratorOptions.size();
+            writer.write(String.format("  Composite features enabled:  %d / %d\n", enabledComposites, totalComposites));
+
+            int enabledFragments = (int) fragmentOptions.values().stream().filter(v -> v).count();
+            int totalFragments = fragmentOptions.size();
+            writer.write(String.format("  Fragment features enabled:   %d / %d\n", enabledFragments, totalFragments));
+            writer.write("\n");
+
+            // Node features
+            writer.write("--- Generator Node Features ---\n");
+            writer.write(String.format("  %-25s  %7s  %7s  %8s  %7s\n", "Feature", "Success", "Count", "Rate", "Status"));
+            writer.write("  " + "-".repeat(65) + "\n");
+            for (GeneratorNode node : GeneratorNode.values()) {
+                Integer success = allNodeSuccess.get(node);
+                Integer count = allNodeCount.get(node);
+                if (count == null || count == 0) {
+                    continue;
+                }
+                boolean enabled = getOption(node);
+                double rate = (double) success / count;
+                writer.write(String.format("  %-25s  %7d  %7d  %7.1f%%  %7s\n",
+                        node, success, count, rate * 100, enabled ? "ON" : "OFF"));
+            }
+            // Also show nodes that are OFF with no data
+            for (GeneratorNode node : GeneratorNode.values()) {
+                if (generatorOptions.containsKey(node) && !generatorOptions.get(node)
+                        && (allNodeCount.get(node) == null || allNodeCount.get(node) == 0)) {
+                    writer.write(String.format("  %-25s  %7s  %7s  %8s  %7s\n", node, "-", "-", "-", "OFF"));
+                }
+            }
+            writer.write("\n");
+
+            // Node examples
+            writer.write("--- Generator Node Examples (success) ---\n");
+            for (Map.Entry<GeneratorNode, String> entry : generatorExample.entrySet()) {
+                if (entry.getValue() != null) {
+                    String sql = entry.getValue().length() > 120
+                            ? entry.getValue().substring(0, 120) + "..."
+                            : entry.getValue();
+                    writer.write(String.format("  [%s]\n    %s\n", entry.getKey(), sql));
+                }
+            }
+            writer.write("\n");
+
+            // Node error examples
+            if (!generatorErrorExample.isEmpty()) {
+                writer.write("--- Generator Node Examples (error) ---\n");
+                for (Map.Entry<GeneratorNode, String> entry : generatorErrorExample.entrySet()) {
+                    if (entry.getValue() != null) {
+                        String sql = entry.getValue().length() > 120
+                                ? entry.getValue().substring(0, 120) + "..."
+                                : entry.getValue();
+                        writer.write(String.format("  [%s]\n    %s\n", entry.getKey(), sql));
+                        String msg = generatorErrorMessage.get(entry.getKey());
+                        if (msg != null) {
+                            writer.write(String.format("    >> %s\n", msg));
+                        }
+                    }
+                }
+                writer.write("\n");
+            }
+
+            // Composite features (functions, etc.)
+            if (!allCompositeCount.isEmpty()) {
+                writer.write("--- Composite Features (Functions/Casts/Operators) ---\n");
+                writer.write(String.format("  %-40s  %7s  %7s  %8s  %7s\n", "Feature", "Success", "Count", "Rate", "Status"));
+                writer.write("  " + "-".repeat(75) + "\n");
+                List<String> sortedKeys = new ArrayList<>(allCompositeCount.keySet());
+                sortedKeys.sort(String::compareTo);
+                for (String key : sortedKeys) {
+                    Integer success = allCompositeSuccess.get(key);
+                    Integer count = allCompositeCount.get(key);
+                    if (count == null || count == 0) {
+                        continue;
+                    }
+                    boolean enabled = getCompositeOption(key);
+                    double rate = (double) success / count;
+                    String displayKey = key.length() > 40 ? key.substring(0, 37) + "..." : key;
+                    writer.write(String.format("  %-40s  %7d  %7d  %7.1f%%  %7s\n",
+                            displayKey, success, count, rate * 100, enabled ? "ON" : "OFF"));
+                }
+                writer.write("\n");
+
+                writer.write(String.format("  (Full composite examples with SQL: see %s-composite-examples.log)\n",
+                        engineName));
+                writer.write("\n");
+            }
+
+            // Fragment features
+            if (!allFragmentCount.isEmpty()) {
+                writer.write("--- Fragment Features ---\n");
+                writer.write(String.format("  %-40s  %7s  %7s  %8s  %7s\n", "Fragment", "Success", "Count", "Rate", "Status"));
+                writer.write("  " + "-".repeat(75) + "\n");
+                for (Map.Entry<GeneralFragmentChoice, Integer> entry : allFragmentCount.entrySet()) {
+                    GeneralFragmentChoice fragment = entry.getKey();
+                    Integer count = entry.getValue();
+                    if (count == null || count == 0) {
+                        continue;
+                    }
+                    Integer success = allFragmentSuccess.getOrDefault(fragment, 0);
+                    boolean enabled = getFragmentOption(fragment);
+                    double rate = (double) success / count;
+                    String name = fragment.getFragmentName();
+                    String displayName = name.length() > 40 ? name.substring(0, 37) + "..." : name;
+                    writer.write(String.format("  %-40s  %7d  %7d  %7.1f%%  %7s\n",
+                            displayName, success, count, rate * 100, enabled ? "ON" : "OFF"));
+                }
+                writer.write("\n");
+
+                // Fragment error examples
+                if (!fragmentErrorExample.isEmpty()) {
+                    writer.write("--- Fragment Feature Examples (error) ---\n");
+                    int fragmentErrorCount = 0;
+                    for (Map.Entry<GeneralFragmentChoice, String> entry : fragmentErrorExample.entrySet()) {
+                        if (entry.getValue() != null && fragmentErrorCount < 20) {
+                            String sql = entry.getValue().length() > 120
+                                    ? entry.getValue().substring(0, 120) + "..."
+                                    : entry.getValue();
+                            writer.write(String.format("  [%s]\n    %s\n", entry.getKey().getFragmentName(), sql));
+                            String msg = fragmentErrorMessage.get(entry.getKey());
+                            if (msg != null) {
+                                writer.write(String.format("    >> %s\n", msg));
+                            }
+                            fragmentErrorCount++;
+                        }
+                    }
+                    writer.write("\n");
+                }
+            }
+
+            // Assertion history
+            if (!assertionGeneratorHistory.isEmpty()) {
+                writer.write("--- Error/Assertion History ---\n");
+                for (Map.Entry<String, GeneratorInfo> entry : assertionGeneratorHistory.entrySet()) {
+                    writer.write(String.format("  Database: %s\n", entry.getKey()));
+                    GeneratorInfo info = entry.getValue();
+                    writer.write(String.format("    Nodes:      %s\n", info.getGeneratorScore().keySet()));
+                    if (!info.getCompositeGeneratorScore().isEmpty()) {
+                        writer.write(String.format("    Composites: %s\n", info.getCompositeGeneratorScore().keySet()));
+                    }
+                    if (!info.getFragmentScore().isEmpty()) {
+                        writer.write(String.format("    Fragments:  %s\n", info.getFragmentScore().keySet()));
+                    }
+                }
+                writer.write("\n");
+            }
+
+            writer.write("=".repeat(80) + "\n");
+        } catch (Exception e) {
+            System.err.println("Error writing feature statistics: " + e.getMessage());
+        }
+    }
+
+    public synchronized void dumpCompositeExamples(GeneralGlobalState globalState) {
+        String engineName = globalState.getDbmsSpecificOptions().getDatabaseEngineFactory().toString();
+        String filePath = "logs/" + engineName + "-composite-examples.log";
+
+        try (FileWriter writer = new FileWriter(filePath)) {
+            writer.write("=".repeat(80) + "\n");
+            writer.write(String.format("Composite Feature Examples — %s (Iteration #%d)\n", engineName, execDatabaseNum));
+            writer.write("=".repeat(80) + "\n\n");
+
+            // Sort keys for consistent output
+            List<String> sortedKeys = new ArrayList<>(allCompositeCount.keySet());
+            sortedKeys.sort(String::compareTo);
+
+            // Per-feature: stats + success example + error example
+            for (String key : sortedKeys) {
+                Integer success = allCompositeSuccess.get(key);
+                Integer count = allCompositeCount.get(key);
+                if (count == null || count == 0) {
+                    continue;
+                }
+                boolean enabled = getCompositeOption(key);
+                double rate = (double) success / count;
+
+                writer.write(String.format("[%s]  success=%d  count=%d  rate=%.1f%%  status=%s\n",
+                        key, success, count, rate * 100, enabled ? "ON" : "OFF"));
+
+                String successSql = compositeExample.get(key);
+                if (successSql != null) {
+                    writer.write("  SUCCESS: " + successSql + "\n");
+                }
+
+                String errorSql = compositeErrorExample.get(key);
+                if (errorSql != null) {
+                    writer.write("  ERROR:   " + errorSql + "\n");
+                    String msg = compositeErrorMessage.get(key);
+                    if (msg != null) {
+                        writer.write("  >> " + msg + "\n");
+                    }
+                }
+
+                writer.write("\n");
+            }
+
+            // Also dump composites that are OFF but have no count data
+            for (Map.Entry<String, Boolean> entry : compositeGeneratorOptions.entrySet()) {
+                if (!entry.getValue() && !allCompositeCount.containsKey(entry.getKey())) {
+                    writer.write(String.format("[%s]  success=-  count=-  rate=-  status=OFF\n\n", entry.getKey()));
+                }
+            }
+
+            writer.write("=".repeat(80) + "\n");
+        } catch (Exception e) {
+            System.err.println("Error writing composite examples: " + e.getMessage());
         }
     }
 

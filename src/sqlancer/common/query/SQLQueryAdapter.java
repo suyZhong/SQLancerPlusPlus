@@ -14,6 +14,7 @@ public class SQLQueryAdapter extends Query<SQLConnection> {
     private final String query;
     private final ExpectedErrors expectedErrors;
     private final boolean couldAffectSchema;
+    private String lastErrorMessage;
 
     public SQLQueryAdapter(String query) {
         this(query, new ExpectedErrors());
@@ -104,11 +105,16 @@ public class SQLQueryAdapter extends Query<SQLConnection> {
         } catch (Exception e) {
             Main.nrUnsuccessfulActions.addAndGet(1);
             checkException(e);
+            lastErrorMessage = e.getMessage();
             globalState.getLogger().writeCurrent(" -- " + e.getMessage());
             return false;
         } finally {
             s.close();
         }
+    }
+
+    public String getLastErrorMessage() {
+        return lastErrorMessage;
     }
 
     public void checkException(Exception e) throws AssertionError {

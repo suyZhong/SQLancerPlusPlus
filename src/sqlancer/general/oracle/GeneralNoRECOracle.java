@@ -179,7 +179,7 @@ public class GeneralNoRECOracle extends NoRECBase<GeneralGlobalState> implements
         } catch (Exception e) {
             rs.close();
             Main.nrUnsuccessfulActions.addAndGet(1);
-            state.getHandler().appendScoreToTable(false, true);
+            state.getHandler().appendScoreToTable(false, true, unoptimizedQueryString, e.getMessage());
             state.getLogger().writeCurrent("-- " + e.getMessage());
             throw new IgnoreMeException();
         }
@@ -218,7 +218,7 @@ public class GeneralNoRECOracle extends NoRECBase<GeneralGlobalState> implements
                 }
             }
         } catch (SQLException e) {
-            state.getHandler().appendScoreToTable(false, true);
+            state.getHandler().appendScoreToTable(false, true, optimizedQueryString, e.getMessage());
             state.getLogger().writeCurrent(e.getMessage());
             throw new IgnoreMeException();
         }

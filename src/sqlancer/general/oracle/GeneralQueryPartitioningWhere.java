@@ -79,7 +79,7 @@ public class GeneralQueryPartitioningWhere extends GeneralQueryPartitioningBase 
             // Noticed that, we would still add some extra information to the generator table. Since the UNION ALL query
             // would not be actually executed but fail due to the previous JOIN query.
             // I think it is fine. We could do dependency analysis later.
-            state.getHandler().appendScoreToTable(false, true);
+            state.getHandler().appendScoreToTable(false, true, originalQueryString, e.getMessage());
             throw e;
         }
 
@@ -100,7 +100,7 @@ public class GeneralQueryPartitioningWhere extends GeneralQueryPartitioningBase 
             secondResultSet = ComparatorHelper.getCombinedResultSet(firstQueryString, secondQueryString,
                     thirdQueryString, combinedString, !orderBy, state, errors);
         } catch (Exception e) {
-            state.getHandler().appendScoreToTable(false, true);
+            state.getHandler().appendScoreToTable(false, true, firstQueryString, e.getMessage());
             throw e;
         }
         try {
