@@ -785,10 +785,7 @@ public class GeneralErrorHandler implements ErrorHandler {
             writer.write("--- Generator Node Examples (success) ---\n");
             for (Map.Entry<GeneratorNode, String> entry : generatorExample.entrySet()) {
                 if (entry.getValue() != null) {
-                    String sql = entry.getValue().length() > 120
-                            ? entry.getValue().substring(0, 120) + "..."
-                            : entry.getValue();
-                    writer.write(String.format("  [%s]\n    %s\n", entry.getKey(), sql));
+                    writer.write(String.format("  [%s]\n    %s\n", entry.getKey(), entry.getValue()));
                 }
             }
             writer.write("\n");
@@ -798,10 +795,7 @@ public class GeneralErrorHandler implements ErrorHandler {
                 writer.write("--- Generator Node Examples (error) ---\n");
                 for (Map.Entry<GeneratorNode, String> entry : generatorErrorExample.entrySet()) {
                     if (entry.getValue() != null) {
-                        String sql = entry.getValue().length() > 120
-                                ? entry.getValue().substring(0, 120) + "..."
-                                : entry.getValue();
-                        writer.write(String.format("  [%s]\n    %s\n", entry.getKey(), sql));
+                        writer.write(String.format("  [%s]\n    %s\n", entry.getKey(), entry.getValue()));
                         String msg = generatorErrorMessage.get(entry.getKey());
                         if (msg != null) {
                             writer.write(String.format("    >> %s\n", msg));
@@ -864,10 +858,7 @@ public class GeneralErrorHandler implements ErrorHandler {
                     int fragmentErrorCount = 0;
                     for (Map.Entry<GeneralFragmentChoice, String> entry : fragmentErrorExample.entrySet()) {
                         if (entry.getValue() != null && fragmentErrorCount < 20) {
-                            String sql = entry.getValue().length() > 120
-                                    ? entry.getValue().substring(0, 120) + "..."
-                                    : entry.getValue();
-                            writer.write(String.format("  [%s]\n    %s\n", entry.getKey().getFragmentName(), sql));
+                            writer.write(String.format("  [%s]\n    %s\n", entry.getKey().getFragmentName(), entry.getValue()));
                             String msg = fragmentErrorMessage.get(entry.getKey());
                             if (msg != null) {
                                 writer.write(String.format("    >> %s\n", msg));
