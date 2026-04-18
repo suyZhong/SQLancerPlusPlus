@@ -247,7 +247,7 @@ public class GeneralErrorHandler implements ErrorHandler {
         // Logical Operator nodes
         LOPAND, LOPOR,
         // Oracles
-        WHERE, NOREC, HAVING,;
+        WHERE, NOREC, HAVING, FUZZING,;
     }
 
     public double getNodeNum() {
