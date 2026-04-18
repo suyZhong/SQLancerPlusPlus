@@ -32,6 +32,10 @@ import sqlancer.general.gen.GeneralRandomQuerySynthesizer;
  * Fuzzing oracle: executes SELECT queries with random predicates and reports bugs when the DBMS
  * raises an internal/unexpected error or loses its connection (indicating a crash). Result
  * correctness is not checked.
+ *
+ * The triggering SELECT is logged to the oracle's local state so it appears in the reduced bug
+ * report. The reproducer uses the last statement in the candidate state, which lets the
+ * StatementReducer correctly determine that the SELECT cannot be removed.
  */
 public class GeneralFuzzingOracle implements TestOracle<GeneralGlobalState> {
 
@@ -47,11 +51,9 @@ public class GeneralFuzzingOracle implements TestOracle<GeneralGlobalState> {
     }
 
     private class GeneralFuzzingReproducer implements Reproducer<GeneralGlobalState> {
-        private final String queryString;
         private String errorMessage;
 
-        GeneralFuzzingReproducer(String queryString, String errorMessage) {
-            this.queryString = queryString;
+        GeneralFuzzingReproducer(String errorMessage) {
             this.errorMessage = errorMessage;
         }
 
@@ -60,10 +62,24 @@ public class GeneralFuzzingOracle implements TestOracle<GeneralGlobalState> {
             return errorMessage;
         }
 
+        /**
+         * Re-runs the last statement from the candidate state. Returning {@code false} when the SELECT
+         * has been removed tells the reducer that the SELECT cannot be dropped from the bug report.
+         */
         @Override
         public boolean bugStillTriggers(GeneralGlobalState globalState) {
+            List<? extends sqlancer.common.query.Query<?>> stmts = globalState.getState().getStatements();
+            if (stmts.isEmpty()) {
+                return false;
+            }
+            // Oracle SELECT is always the last logged statement.
+            // If the reducer removed it, the last stmt will be DDL → not a SELECT → bug can't trigger.
+            String oracleQuery = stmts.get(stmts.size() - 1).getQueryString().trim();
+            if (!oracleQuery.toUpperCase().startsWith("SELECT")) {
+                return false;
+            }
             try (Statement stmt = globalState.getConnection().createStatement();
-                    ResultSet rs = stmt.executeQuery(queryString)) {
+                    ResultSet rs = stmt.executeQuery(oracleQuery)) {
                 while (rs.next()) {
                 }
                 return false;
@@ -74,6 +90,7 @@ public class GeneralFuzzingOracle implements TestOracle<GeneralGlobalState> {
                 }
                 return false;
             } catch (Exception e) {
+                // Non-SQL exception (connection reset etc.) also signals a crash
                 this.errorMessage = e.getMessage();
                 return true;
             }
@@ -118,6 +135,11 @@ public class GeneralFuzzingOracle implements TestOracle<GeneralGlobalState> {
 
         String queryString = GeneralToStringVisitor.asString(select);
 
+        // Log to the current oracle-run local state.
+        // OracleRunReproductionState.close() flushes this to the main state only on the bug path
+        // (i.e. when success=false), so it won't pollute successful runs.
+        state.getState().getLocalState().log(queryString);
+
         try (Statement stmt = state.getConnection().createStatement()) {
             if (state.getOptions().logEachSelect()) {
                 state.getLogger().writeCurrent(queryString);
@@ -132,9 +154,9 @@ public class GeneralFuzzingOracle implements TestOracle<GeneralGlobalState> {
             Main.nrUnsuccessfulActions.addAndGet(1);
             if (isInternalOrCrashError(e)) {
                 state.getHandler().appendScoreToTable(true, true, queryString);
-                String errorMessage = "Internal/unexpected DBMS error triggered by fuzzing query.\n" + "Query: "
-                        + queryString + "\nError: " + e.getMessage();
-                reproducer = new GeneralFuzzingReproducer(queryString, errorMessage);
+                String errorMessage = "Internal/unexpected DBMS error.\nQuery: " + queryString + "\nError: "
+                        + e.getMessage();
+                reproducer = new GeneralFuzzingReproducer(errorMessage);
                 throw new AssertionError(errorMessage);
             }
             state.getHandler().appendScoreToTable(false, true, queryString, e.getMessage());
@@ -147,7 +169,7 @@ public class GeneralFuzzingOracle implements TestOracle<GeneralGlobalState> {
      * Returns true when the exception likely indicates a server-side crash or internal error rather
      * than a normal SQL error that the DBMS rejected gracefully.
      */
-    private static boolean isInternalOrCrashError(SQLException e) {
+    static boolean isInternalOrCrashError(SQLException e) {
         // SQLState class "08" covers all connection exceptions (crash / connection loss)
         String sqlState = e.getSQLState();
         if (sqlState != null && sqlState.startsWith("08")) {
