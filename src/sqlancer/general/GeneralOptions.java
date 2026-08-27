@@ -73,8 +73,42 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
     @Parameter(names = "--use-retrieval-augmentation", description = "Enable The retrieval augmentation", arity = 1)
     public boolean useRetrievalAugmentation = true;
 
-    @Parameter(names = "--enable-direct-validation", description = "Enable direct validation", arity = 1)
+    @Parameter(names = "--enable-statement-learning", description = "Enable learning statement-level features", arity = 1)
+    public boolean enableStatementLearning = true;
+
+    @Parameter(names = "--enable-datatype-learning", description = "Enable learning data types", arity = 1)
+    public boolean enableDatatypeLearning = true;
+
+    @Parameter(names = "--enable-expression-learning", description = "Enable learning functions and operators", arity = 1)
+    public boolean enableExpressionLearning = true;
+
+    @Parameter(names = "--enable-clause-learning", description = "Enable learning clause-level features", arity = 1)
+    public boolean enableClauseLearning = true;
+
+    @Parameter(names = "--enable-direct-validation", description = "Validate newly learned fragments on the target DBMS", arity = 1)
     public boolean enableDirectValidation;
+
+    @Parameter(names = "--random-clause-fragments", description = "Randomly omit learned CREATE TABLE clause fragments", arity = 1)
+    public boolean randomClauseFragments;
+
+    @Parameter(names = "--learning-interval-seconds", description = "Minimum interval between dynamic learning requests")
+    public int learningIntervalSeconds = 60;
+
+    public boolean isLearningEnabled(GeneralLearningManager.SQLFeature feature) {
+        switch (feature) {
+        case COMMAND:
+            return enableStatementLearning;
+        case DATATYPE:
+            return enableDatatypeLearning;
+        case FUNCTION:
+        case OPERATOR:
+            return enableExpressionLearning;
+        case CLAUSE:
+            return enableClauseLearning;
+        default:
+            throw new AssertionError(feature);
+        }
+    }
 
     public enum GeneralOracleFactory implements OracleFactory<GeneralGlobalState> {
         NOREC {

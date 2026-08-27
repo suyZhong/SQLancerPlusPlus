@@ -66,7 +66,7 @@ public final class GeneralTableGenerator {
                 matcher.appendReplacement(result, replacement);
             }
             matcher.appendTail(result);
-            queries.add(result.toString());
+            queries.add(result.toString().replace("TEST_TABLE", databaseName));
             return queries;
         }
 
@@ -103,7 +103,8 @@ public final class GeneralTableGenerator {
         } else {
             globalState.setTestObject("TEST_TABLE", tableName);
         }
-        GeneralStringBuilder<GeneralTableFragments> sb = new GeneralStringBuilder<>(globalState, fragments);
+        GeneralStringBuilder<GeneralTableFragments> sb = new GeneralStringBuilder<>(globalState, fragments,
+                globalState.getDbmsSpecificOptions().randomClauseFragments);
         sb.append("CREATE ", 0);
         sb.append(" TABLE ");
         sb.append(" ");

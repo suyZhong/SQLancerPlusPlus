@@ -366,8 +366,12 @@ public abstract class GeneralFragments {
         }
     }
 
-    public void updateFragmentsFromLearner(GeneralGlobalState globalState) {
+    public void beginLearningBatch() {
         newFragments.clear();
+    }
+
+    public void updateFragmentsFromLearner(GeneralGlobalState globalState) {
+        beginLearningBatch();
         String template = genLearnStatement(globalState);
         currentSketch = template;
         String variables = getVariables();
@@ -392,7 +396,7 @@ public abstract class GeneralFragments {
         // printFragments();
     }
 
-    private void validateNewFragments(GeneralGlobalState globalState) {
+    public void validateNewFragments(GeneralGlobalState globalState) {
         for (String key : newFragments.keySet()) {
             List<GeneralFragmentChoice> choices = newFragments.get(key);
             List<GeneralFragmentChoice> toRemove = new ArrayList<>();
