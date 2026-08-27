@@ -163,6 +163,13 @@ public class GeneralSchema extends AbstractSchema<GeneralGlobalState, GeneralTab
 
         @Override
         public void learnSpecificTopicFromLearner(GeneralGlobalState globalState, String type) {
+            GeneralFragments typeFragments = GeneralSchema.getFragments();
+            GeneralFragments functionFragments = GeneralFunction.getFragments();
+            GeneralFragments operatorFragments = GeneralBinaryOperator.getFragments();
+            typeFragments.beginLearningBatch();
+            functionFragments.beginLearningBatch();
+            operatorFragments.beginLearningBatch();
+
             StringBuilder templateBuilder = new StringBuilder();
             templateBuilder.append(String.format("CREATE TABLE TEST_TABLE (COL %s);\n", type));
             templateBuilder
@@ -210,6 +217,11 @@ public class GeneralSchema extends AbstractSchema<GeneralGlobalState, GeneralTab
             }
 
             loadFragmentsFromCSV(new StringReader(fragmentsString), globalState, true);
+            if (globalState.getDbmsSpecificOptions().enableDirectValidation) {
+                typeFragments.validateNewFragments(globalState);
+                functionFragments.validateNewFragments(globalState);
+                operatorFragments.validateNewFragments(globalState);
+            }
 
         }
 

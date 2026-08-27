@@ -352,22 +352,32 @@ public class GeneralProvider extends SQLProviderAdapter<GeneralProvider.GeneralG
             GeneralDatabaseEngineFactory databaseEngine = globalState.getDbmsSpecificOptions()
                     .getDatabaseEngineFactory();
             try (Connection conn = DriverManager.getConnection(databaseEngine.getJDBCString(globalState))) {
-                try (Statement s = conn.createStatement()) {
-                    s.execute("DROP TABLE " + databaseName);
-                } catch (SQLException e) {
-                    // do nothing
+                try {
+                    dropValidationTable(conn, databaseEngine, databaseName);
+                    try (Statement stmt = conn.createStatement()) {
+                        for (String query : queries) {
+                            stmt.execute(query);
+                        }
+                    }
+                    return true;
+                } finally {
+                    dropValidationTable(conn, databaseEngine, databaseName);
                 }
-                Statement stmt = conn.createStatement();
-                for (String query : queries) {
-                    stmt.addBatch(query);
-                }
-                stmt.executeBatch();
             } catch (SQLException e) {
-                // TODO Auto-generated catch block
-                // System.out.println("Error: " + e.getMessage());
+                if (globalState.getOptions().debugLogs()) {
+                    System.out.println("Native validation failed: " + e.getMessage());
+                }
                 return false;
             }
-            return true;
+        }
+
+        private void dropValidationTable(Connection connection, GeneralDatabaseEngineFactory databaseEngine,
+                String databaseName) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(databaseEngine.getDropTableStatement(databaseName));
+            } catch (SQLException ignored) {
+                // The validation table might not exist or the candidate might have failed before creating it.
+            }
         }
 
     }

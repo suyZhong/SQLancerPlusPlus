@@ -66,7 +66,7 @@ public final class GeneralTableGenerator {
                 matcher.appendReplacement(result, replacement);
             }
             matcher.appendTail(result);
-            queries.add(result.toString());
+            queries.add(result.toString().replace("TEST_TABLE", databaseName));
             return queries;
         }
 

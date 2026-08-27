@@ -85,7 +85,7 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
     @Parameter(names = "--enable-clause-learning", description = "Enable learning clause-level features", arity = 1)
     public boolean enableClauseLearning = true;
 
-    @Parameter(names = "--enable-direct-validation", description = "Enable direct validation", arity = 1)
+    @Parameter(names = "--enable-direct-validation", description = "Validate newly learned fragments on the target DBMS", arity = 1)
     public boolean enableDirectValidation;
 
     @Parameter(names = "--random-clause-fragments", description = "Randomly omit learned CREATE TABLE clause fragments", arity = 1)
