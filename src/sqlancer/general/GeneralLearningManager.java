@@ -14,6 +14,8 @@ import sqlancer.general.learner.GeneralFragments;
 
 public class GeneralLearningManager {
 
+    private static final GeneralLearningScheduler LEARNING_SCHEDULER = new GeneralLearningScheduler();
+
     private String curTopic;
     private int learnCount;
     // if True, then the topic is learned
@@ -79,7 +81,18 @@ public class GeneralLearningManager {
             for (String topic : fragments.getFragments().keySet()) {
                 topicPool.put(topic, false);
             }
+        } else {
+            for (String topic : fragments.getFragments().keySet()) {
+                topicPool.putIfAbsent(topic, false);
+            }
+            topicPool.replaceAll((topic, learned) -> false);
         }
+    }
+
+    public boolean tryAcquireLearningSlot(GeneralGlobalState globalState) {
+        GeneralOptions options = globalState.getDbmsSpecificOptions();
+        String databaseEngine = options.getDatabaseEngineFactory().toString();
+        return LEARNING_SCHEDULER.tryAcquire(databaseEngine, options.learningIntervalSeconds);
     }
 
     public void learnTypeByTopic(GeneralGlobalState globalState) {
@@ -110,7 +123,8 @@ public class GeneralLearningManager {
                     .map(Map.Entry::getKey).collect(Collectors.toList());
             if (topics.isEmpty()) {
                 curTopic = null;
-                System.out.println("All topics are learned");
+                System.out.println("All topics are learned. Refresh");
+                initializeTopicPool(fragments);
                 return;
             }
             String topic = Randomly.fromList(topics);

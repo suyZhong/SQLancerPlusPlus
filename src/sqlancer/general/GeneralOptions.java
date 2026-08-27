@@ -91,6 +91,9 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
     @Parameter(names = "--random-clause-fragments", description = "Randomly omit learned CREATE TABLE clause fragments", arity = 1)
     public boolean randomClauseFragments;
 
+    @Parameter(names = "--learning-interval-seconds", description = "Minimum interval between dynamic learning requests")
+    public int learningIntervalSeconds = 60;
+
     public boolean isLearningEnabled(GeneralLearningManager.SQLFeature feature) {
         switch (feature) {
         case COMMAND:

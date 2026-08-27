@@ -1,5 +1,6 @@
 package sqlancer.general;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -12,6 +13,8 @@ public class TestGeneralLearningOptions {
     @Test
     public void testAllLearningKindsEnabledByDefault() {
         GeneralOptions options = new GeneralOptions();
+
+        assertEquals(60, options.learningIntervalSeconds);
 
         for (SQLFeature feature : SQLFeature.values()) {
             assertTrue(options.isLearningEnabled(feature), feature.toString());

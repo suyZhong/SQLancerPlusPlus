@@ -269,7 +269,7 @@ public class GeneralProvider extends SQLProviderAdapter<GeneralProvider.GeneralG
                 GeneralIndexGenerator.getFragments().dumpFragments(this);
                 GeneralSchema.getFragments().dumpFragments(this);
                 GeneralStatementGenerator.getFragments().dumpFragments(this);
-                if (status && Randomly.getBoolean()) {
+                if (status && Randomly.getBoolean() && manager.tryAcquireLearningSlot(this)) {
                     // randomly pick one of the fragment to update by LLM
                     List<GeneralFragments> enabledFragments = new ArrayList<>();
                     if (getDbmsSpecificOptions()
@@ -596,7 +596,8 @@ public class GeneralProvider extends SQLProviderAdapter<GeneralProvider.GeneralG
         // TODO not sure whether diable should come before or after the learning
         globalState.getHandler().disableOptions(String.format("dbconfigs/%s/disabled_options.csv", dbmsName));
         if (globalState.getDbmsSpecificOptions()
-                .isLearningEnabled(GeneralLearningManager.SQLFeature.DATATYPE)) {
+                .isLearningEnabled(GeneralLearningManager.SQLFeature.DATATYPE)
+                && globalState.getLearningManager().tryAcquireLearningSlot(globalState)) {
             globalState.getLearningManager().learnTypeByTopic(globalState);
         }
         return super.generateAndTestDatabase(globalState);
