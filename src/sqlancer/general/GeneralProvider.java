@@ -271,9 +271,23 @@ public class GeneralProvider extends SQLProviderAdapter<GeneralProvider.GeneralG
                 GeneralStatementGenerator.getFragments().dumpFragments(this);
                 if (status && Randomly.getBoolean()) {
                     // randomly pick one of the fragment to update by LLM
-                    GeneralFragments f = Randomly.fromOptions(GeneralTableGenerator.getFragments(),
-                            GeneralIndexGenerator.getFragments(), GeneralStatementGenerator.getFragments());
-                    f.updateFragmentsFromLearner(this);
+                    List<GeneralFragments> enabledFragments = new ArrayList<>();
+                    if (getDbmsSpecificOptions()
+                            .isLearningEnabled(GeneralLearningManager.SQLFeature.CLAUSE)) {
+                        enabledFragments.add(GeneralTableGenerator.getFragments());
+                        enabledFragments.add(GeneralIndexGenerator.getFragments());
+                    }
+                    if (getDbmsSpecificOptions()
+                            .isLearningEnabled(GeneralLearningManager.SQLFeature.COMMAND)) {
+                        enabledFragments.add(GeneralStatementGenerator.getFragments());
+                    }
+                    if (getDbmsSpecificOptions()
+                            .isLearningEnabled(GeneralLearningManager.SQLFeature.FUNCTION)) {
+                        enabledFragments.add(GeneralFunction.getFragments());
+                    }
+                    if (!enabledFragments.isEmpty()) {
+                        Randomly.fromList(enabledFragments).updateFragmentsFromLearner(this);
+                    }
                 }
             }
             if (getDbmsSpecificOptions().enableErrorHandling) {
@@ -557,11 +571,20 @@ public class GeneralProvider extends SQLProviderAdapter<GeneralProvider.GeneralG
         GeneralBinaryOperator.loadOperatorsFromFragments(globalState);
 
         if (globalState.getOptions().enableLearning()) {
-            GeneralStatementGenerator.getFragments().updateFragmentsFromLearner(globalState);
-            GeneralSchema.getFragments().updateFragmentsFromLearner(globalState);
-            GeneralFunction.getFragments().updateFragmentsFromLearner(globalState);
-            GeneralIndexGenerator.getFragments().updateFragmentsFromLearner(globalState);
-            GeneralTableGenerator.getFragments().updateFragmentsFromLearner(globalState);
+            GeneralOptions options = globalState.getDbmsSpecificOptions();
+            if (options.isLearningEnabled(GeneralLearningManager.SQLFeature.COMMAND)) {
+                GeneralStatementGenerator.getFragments().updateFragmentsFromLearner(globalState);
+            }
+            if (options.isLearningEnabled(GeneralLearningManager.SQLFeature.DATATYPE)) {
+                GeneralSchema.getFragments().updateFragmentsFromLearner(globalState);
+            }
+            if (options.isLearningEnabled(GeneralLearningManager.SQLFeature.FUNCTION)) {
+                GeneralFunction.getFragments().updateFragmentsFromLearner(globalState);
+            }
+            if (options.isLearningEnabled(GeneralLearningManager.SQLFeature.CLAUSE)) {
+                GeneralIndexGenerator.getFragments().updateFragmentsFromLearner(globalState);
+                GeneralTableGenerator.getFragments().updateFragmentsFromLearner(globalState);
+            }
         }
 
     }
@@ -572,7 +595,10 @@ public class GeneralProvider extends SQLProviderAdapter<GeneralProvider.GeneralG
         String dbmsName = globalState.getDbmsSpecificOptions().getDatabaseEngineFactory().toString().toLowerCase();
         // TODO not sure whether diable should come before or after the learning
         globalState.getHandler().disableOptions(String.format("dbconfigs/%s/disabled_options.csv", dbmsName));
-        globalState.getLearningManager().learnTypeByTopic(globalState);
+        if (globalState.getDbmsSpecificOptions()
+                .isLearningEnabled(GeneralLearningManager.SQLFeature.DATATYPE)) {
+            globalState.getLearningManager().learnTypeByTopic(globalState);
+        }
         return super.generateAndTestDatabase(globalState);
     }
 

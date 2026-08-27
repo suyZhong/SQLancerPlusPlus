@@ -241,6 +241,9 @@ public class GeneralSchema extends AbstractSchema<GeneralGlobalState, GeneralTab
             GeneralFragments typeFragments = GeneralSchema.getFragments();
             GeneralFragments funcFragments = GeneralFunction.getFragments();
             GeneralFragments opFragments = GeneralBinaryOperator.getFragments();
+            if (!key.equals("0") && !globalState.getDbmsSpecificOptions().enableExpressionLearning) {
+                return;
+            }
 
             switch (key) {
             case "0":
