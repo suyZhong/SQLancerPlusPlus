@@ -16,6 +16,8 @@ Requirements:
 - [OpenAI API Key](https://platform.openai.com/docs/api-reference/authentication)
 - Python 3.12 or above
 
+Documentation retrieval first uses the official URLs in `dbconfigs/url.yml`, so a search API is not required for the configured DBMS and feature. Google search credentials remain an optional fallback for missing mappings and can be supplied through `GOOGLE_API_KEY` and `GOOGLE_CSE_ID` environment variables or the legacy files under `dbconfigs/`. This fallback additionally requires `langchain-google-community`.
+
 ```bash
 # Install the requirements for documentation retrieval
 pip install -r requirements.txt

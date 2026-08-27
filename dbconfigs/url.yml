@@ -1,0 +1,17 @@
+DuckDB:
+  clause:
+    CREATE_INDEX:
+      - https://duckdb.org/docs/stable/sql/statements/create_index
+    CREATE_TABLE:
+      - https://duckdb.org/docs/stable/sql/statements/create_table
+    overview:
+      - https://duckdb.org/docs/stable/sql/query_syntax/select
+  command:
+    overview:
+      - https://duckdb.org/docs/stable/sql/statements/overview
+  datatype:
+    overview:
+      - https://duckdb.org/docs/stable/sql/data_types/overview
+  function:
+    overview:
+      - https://duckdb.org/docs/stable/sql/functions/overview
