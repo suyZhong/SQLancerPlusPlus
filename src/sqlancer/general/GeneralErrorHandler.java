@@ -196,24 +196,27 @@ public class GeneralErrorHandler implements ErrorHandler {
             }
         }
 
-        public synchronized <N> Map<N, Double> calcAverageScore(Map<N, Integer> success, Map<N, Integer> count,
+        public <N> Map<N, Double> calcAverageScore(Map<N, Integer> success, Map<N, Integer> count,
                 Map<N, Integer> allSuccess, Map<N, Integer> allCount, int minCnt, boolean quickStart) {
             Map<N, Double> average = new HashMap<>();
-            // sum the success and count
-            for (Map.Entry<N, Integer> entry : success.entrySet()) {
-                N key = entry.getKey();
-                if (allSuccess.containsKey(key)) {
-                    allSuccess.put(key, allSuccess.get(key) + entry.getValue());
-                    allCount.put(key, allCount.get(key) + count.get(key));
-                } else {
-                    allSuccess.put(key, entry.getValue());
-                    allCount.put(key, count.get(key));
+            // allSuccess and allCount are static maps shared by all threads, so lock the class, not this table
+            synchronized (GeneralErrorHandler.class) {
+                // sum the success and count
+                for (Map.Entry<N, Integer> entry : success.entrySet()) {
+                    N key = entry.getKey();
+                    if (allSuccess.containsKey(key)) {
+                        allSuccess.put(key, allSuccess.get(key) + entry.getValue());
+                        allCount.put(key, allCount.get(key) + count.get(key));
+                    } else {
+                        allSuccess.put(key, entry.getValue());
+                        allCount.put(key, count.get(key));
+                    }
                 }
-            }
-            for (Map.Entry<N, Integer> entry : allSuccess.entrySet()) {
-                int cnt = allCount.get(entry.getKey());
-                if (cnt > minCnt || quickStart && entry.getValue() > 0) {
-                    average.put(entry.getKey(), (double) entry.getValue() / cnt);
+                for (Map.Entry<N, Integer> entry : allSuccess.entrySet()) {
+                    int cnt = allCount.get(entry.getKey());
+                    if (cnt > minCnt || quickStart && entry.getValue() > 0) {
+                        average.put(entry.getKey(), (double) entry.getValue() / cnt);
+                    }
                 }
             }
             return average;
