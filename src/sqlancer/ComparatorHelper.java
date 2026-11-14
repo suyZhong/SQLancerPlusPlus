@@ -140,6 +140,44 @@ public final class ComparatorHelper {
                 combinedString, state);
     }
 
+    /**
+     * Checks that every distinct value of the first result set also occurs in the second result set.
+     *
+     * @param resultSet
+     *            the result set that is expected to be contained
+     * @param secondResultSet
+     *            the result set that is expected to contain the first one
+     * @param containedQueryString
+     *            the query that produced the first result set
+     * @param containingQueryStrings
+     *            the queries that produced the second result set
+     * @param state
+     *            the global state
+     * @param canonicalizationRule
+     *            a rule applied to the values of both result sets before they are compared
+     */
+    public static void assumeResultSetIsContained(List<String> resultSet, List<String> secondResultSet,
+            String containedQueryString, List<String> containingQueryStrings, SQLGlobalState<?, ?> state,
+            UnaryOperator<String> canonicalizationRule) {
+        Set<String> firstHashSet = resultSet.stream().map(canonicalizationRule).collect(Collectors.toSet());
+        Set<String> secondHashSet = secondResultSet.stream().map(canonicalizationRule).collect(Collectors.toSet());
+        if (!secondHashSet.containsAll(firstHashSet)) {
+            Set<String> secondResultSetMisses = new HashSet<>(firstHashSet);
+            secondResultSetMisses.removeAll(secondHashSet);
+            String containingQueryString = String.join(";", containingQueryStrings);
+            String firstQueryString = String.format("-- Query: \"%s\"", containedQueryString);
+            String secondQueryString = String.format("-- Query: \"%s\"; It misses: \"%s\"", containingQueryString,
+                    secondResultSetMisses);
+            state.getState().getLocalState()
+                    .log(String.format("%s" + System.lineSeparator() + "%s", firstQueryString, secondQueryString));
+            String assertionMessage = String.format(
+                    "The second result set does not contain the first one!" + System.lineSeparator()
+                            + "First query : \"%s\"" + System.lineSeparator() + "Second query: \"%s\"",
+                    containedQueryString, secondQueryString);
+            throw new AssertionError(assertionMessage);
+        }
+    }
+
     public static List<String> getCombinedResultSet(String firstQueryString, String secondQueryString,
             String thirdQueryString, List<String> combinedString, boolean asUnion, SQLGlobalState<?, ?> state,
             ExpectedErrors errors) throws SQLException {

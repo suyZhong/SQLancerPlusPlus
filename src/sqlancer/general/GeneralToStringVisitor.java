@@ -5,6 +5,7 @@ import sqlancer.common.ast.newast.Node;
 import sqlancer.general.ast.GeneralCast;
 import sqlancer.general.ast.GeneralColumnReference;
 import sqlancer.general.ast.GeneralConstant;
+import sqlancer.general.ast.GeneralExists;
 import sqlancer.general.ast.GeneralExpression;
 import sqlancer.general.ast.GeneralJoin;
 import sqlancer.general.ast.GeneralSelect;
@@ -26,6 +27,8 @@ public class GeneralToStringVisitor extends NewToStringVisitor<GeneralExpression
             visit((GeneralCast) expr);
         } else if (expr instanceof GeneralSubquery) {
             visit((GeneralSubquery) expr);
+        } else if (expr instanceof GeneralExists) {
+            visit((GeneralExists) expr);
         } else {
             throw new AssertionError(expr.getClass());
         }
@@ -122,6 +125,16 @@ public class GeneralToStringVisitor extends NewToStringVisitor<GeneralExpression
         sb.append(" AS ");
         sb.append(subquery.getName());
         sb.append(" ");
+    }
+
+    private void visit(GeneralExists exists) {
+        sb.append("(");
+        if (exists.isNegated()) {
+            sb.append("NOT ");
+        }
+        sb.append("EXISTS (");
+        visit(exists.getSelect());
+        sb.append("))");
     }
 
     public static String asString(Node<GeneralExpression> expr) {
