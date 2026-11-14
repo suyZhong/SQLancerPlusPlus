@@ -39,11 +39,14 @@ import sqlancer.general.gen.GeneralRandomQuerySynthesizer;
  * <li>LEFT: the rows are those of the inner join and those of the anti join.</li>
  * <li>RIGHT: the rows contain those of the inner join.</li>
  * <li>FULL: the rows contain those of the inner, left, right, and anti joins.</li>
+ * <li>SEMI and ANTI: the rows of both joins are those of the left side of the join. The rows of each are those of the
+ * left side for which a row of the right side exists, or does not exist, respectively.</li>
  * <li>NATURAL LEFT: the rows contain those of the natural inner join.</li>
  * <li>NATURAL FULL: the rows contain those of the natural inner, left, and right joins.</li>
  * </ul>
  *
- * The anti join is expressed as a NOT EXISTS predicate over the right side of the join.
+ * Where the anti join is not the replaced join, it is expressed as a NOT EXISTS predicate over the right side of the
+ * join, or as an anti join if the DBMS supports its syntax.
  */
 public class GeneralJIROracle extends GeneralQueryPartitioningBase {
 
@@ -61,12 +64,15 @@ public class GeneralJIROracle extends GeneralQueryPartitioningBase {
     }
 
     private class GeneralJIRReproducer implements Reproducer<GeneralGlobalState> {
-        private final List<String> queryStrings;
+        private final List<String> firstQueryStrings;
+        private final List<String> secondQueryStrings;
         private final boolean contained;
         private String errorMessage;
 
-        GeneralJIRReproducer(List<String> queryStrings, boolean contained, String errorMessage) {
-            this.queryStrings = queryStrings;
+        GeneralJIRReproducer(List<String> firstQueryStrings, List<String> secondQueryStrings, boolean contained,
+                String errorMessage) {
+            this.firstQueryStrings = firstQueryStrings;
+            this.secondQueryStrings = secondQueryStrings;
             this.contained = contained;
             this.errorMessage = errorMessage;
         }
@@ -79,9 +85,9 @@ public class GeneralJIROracle extends GeneralQueryPartitioningBase {
         @Override
         public boolean bugStillTriggers(GeneralGlobalState globalState) {
             try {
-                List<String> resultSet = ComparatorHelper.getResultSetFirstColumnAsString(originalQueryString, errors,
-                        globalState);
-                compare(resultSet, getResultSets(queryStrings, globalState), queryStrings, contained, globalState);
+                compare(getResultSets(firstQueryStrings, globalState, false),
+                        getResultSets(secondQueryStrings, globalState, false), firstQueryStrings, secondQueryStrings,
+                        contained, globalState);
             } catch (AssertionError triggeredError) {
                 this.errorMessage = triggeredError.getMessage();
                 return true;
@@ -108,10 +114,6 @@ public class GeneralJIROracle extends GeneralQueryPartitioningBase {
         // attributed only to the features that the derived query adds.
         handler.appendScoreToTable(true, true, originalQueryString);
 
-        if (join.getJoinType() == JoinType.NATURAL) {
-            checkNaturalJoin();
-            return;
-        }
         switch (join.getJoinType()) {
         case INNER:
             checkInnerJoin();
@@ -124,6 +126,13 @@ public class GeneralJIROracle extends GeneralQueryPartitioningBase {
             break;
         case FULL:
             checkFullJoin();
+            break;
+        case SEMI:
+        case ANTI:
+            checkSemiOrAntiJoin();
+            break;
+        case NATURAL:
+            checkNaturalJoin();
             break;
         default:
             throw new AssertionError(join.getJoinType());
@@ -138,24 +147,22 @@ public class GeneralJIROracle extends GeneralQueryPartitioningBase {
         List<TableReferenceNode<GeneralExpression, GeneralTable>> tableList = tables.stream()
                 .map(t -> new TableReferenceNode<GeneralExpression, GeneralTable>(t)).collect(Collectors.toList());
         boolean allowSubquery = handler.getOption(GeneratorNode.SUBQUERY);
+        // The general generator does not produce semi and anti joins, so that one is requested here.
+        JoinType semiOrAntiJoinType = getSemiOrAntiJoinType();
+        Node<GeneralExpression> lastJoin = null;
+        if (semiOrAntiJoinType != null) {
+            lastJoin = generateJoin(tableList, semiOrAntiJoinType, "subj");
+        }
         if (Randomly.getBoolean() || !allowSubquery) {
             joins = GeneralJoin.getJoins(tableList, state);
         } else {
             joins = GeneralJoin.getJoinsWithSubquery(tableList, state);
         }
-        if (joins.isEmpty()) {
+        if (lastJoin != null) {
+            joins.add(lastJoin);
+        } else if (joins.isEmpty()) {
             // the oracle requires a join, which the general generator produces only occasionally
-            if (!handler.getOption(GeneratorNode.JOIN)) {
-                throw new IgnoreMeException();
-            }
-            if (tableList.size() >= 2 && (Randomly.getBoolean() || !allowSubquery)) {
-                joins.add(GeneralJoin.getJoin(tableList, state));
-            } else if (allowSubquery) {
-                List<GeneralTable> subqueryTables = List.of(Randomly.fromList(tables));
-                joins.add(GeneralJoin.getJoinWithSubquery(tableList, subqueryTables, "sub0", state));
-            } else {
-                throw new IgnoreMeException();
-            }
+            joins.add(generateJoin(tableList, null, "sub0"));
         }
         // The last join is the one that is replaced. Some DBMSs treat the comma as a join operator that is as binding
         // as the others, so that an outer join that follows the replaced join would have it as an operand, in which
@@ -174,9 +181,44 @@ public class GeneralJIROracle extends GeneralQueryPartitioningBase {
         select.setWhereClause(null);
     }
 
+    private JoinType getSemiOrAntiJoinType() {
+        GeneralErrorHandler handler = state.getHandler();
+        if (!handler.getOption(GeneratorNode.JOIN) || Randomly.getBoolean() || Randomly.getBoolean()) {
+            return null;
+        }
+        List<JoinType> joinTypes = new ArrayList<>();
+        if (handler.getOption(GeneratorNode.SEMI_JOIN)) {
+            joinTypes.add(JoinType.SEMI);
+        }
+        if (handler.getOption(GeneratorNode.ANTI_JOIN)) {
+            joinTypes.add(JoinType.ANTI);
+        }
+        return joinTypes.isEmpty() ? null : Randomly.fromList(joinTypes);
+    }
+
+    private Node<GeneralExpression> generateJoin(List<TableReferenceNode<GeneralExpression, GeneralTable>> tableList,
+            JoinType joinType, String subqueryName) {
+        GeneralErrorHandler handler = state.getHandler();
+        if (!handler.getOption(GeneratorNode.JOIN)) {
+            throw new IgnoreMeException();
+        }
+        boolean allowSubquery = handler.getOption(GeneratorNode.SUBQUERY);
+        if (tableList.size() >= 2 && (Randomly.getBoolean() || !allowSubquery)) {
+            return GeneralJoin.getJoin(tableList, joinType, state);
+        } else if (allowSubquery) {
+            List<GeneralTable> subqueryTables = List.of(Randomly.fromList(targetTables.getTables()));
+            return GeneralJoin.getJoinWithSubquery(tableList, subqueryTables, subqueryName, joinType, state);
+        }
+        throw new IgnoreMeException();
+    }
+
     private static boolean hasRelation(GeneralJoin candidate) {
         return candidate.getJoinType() != JoinType.NATURAL || candidate.getOuterType() == OuterType.LEFT
                 || candidate.getOuterType() == OuterType.FULL;
+    }
+
+    private static boolean isSemiOrAnti(GeneralJoin candidate) {
+        return candidate.getJoinType() == JoinType.SEMI || candidate.getJoinType() == JoinType.ANTI;
     }
 
     @Override
@@ -189,9 +231,37 @@ public class GeneralJIROracle extends GeneralQueryPartitioningBase {
                 columns.addAll(((GeneralSubquery) right).getTable().getColumns());
             }
         }
+        if (isSemiOrAnti(join)) {
+            // the right side of a semi or anti join is not visible
+            columns.removeIf(this::isRightColumn);
+        }
         fetchColumns = Randomly.nonEmptySubset(columns);
-        return fetchColumns.stream().map(c -> new ColumnReferenceNode<GeneralExpression, GeneralColumn>(c))
-                .collect(Collectors.toList());
+        return getColumnReferences(false);
+    }
+
+    private boolean isRightColumn(GeneralColumn column) {
+        return column.getTable().getName().equals(getRightTable().getName());
+    }
+
+    /**
+     * Gets the fetch columns of the query.
+     *
+     * @param hideRightSide
+     *            whether the columns of the right side of the join are replaced by NULL, which is what a query fetches
+     *            for the rows of the left side that have no match
+     *
+     * @return the fetch columns
+     */
+    private List<Node<GeneralExpression>> getColumnReferences(boolean hideRightSide) {
+        List<Node<GeneralExpression>> columns = new ArrayList<>();
+        for (GeneralColumn column : fetchColumns) {
+            if (hideRightSide && isRightColumn(column)) {
+                columns.add(GeneralConstant.createNullConstant());
+            } else {
+                columns.add(new ColumnReferenceNode<GeneralExpression, GeneralColumn>(column));
+            }
+        }
+        return columns;
     }
 
     private void checkInnerJoin() throws SQLException {
@@ -201,19 +271,26 @@ public class GeneralJIROracle extends GeneralQueryPartitioningBase {
         for (Node<GeneralExpression> partition : List.of(predicate, negatedPredicate, isNullPredicate)) {
             Node<GeneralExpression> onCondition = new NewBinaryOperatorNode<>(join.getOnCondition(), partition,
                     GeneralBinaryLogicalOperator.AND);
-            queryStrings.add(getQueryString(join.withOnCondition(onCondition)));
+            queryStrings.add(getQueryString(false, join.withOnCondition(onCondition), null));
         }
-        checkRelation(combine(queryStrings), false);
+        checkRelation(List.of(originalQueryString), combine(queryStrings), false);
     }
 
     private void checkLeftJoin() throws SQLException {
-        if (!state.getHandler().getOption(GeneratorNode.EXISTS)) {
+        GeneralErrorHandler handler = state.getHandler();
+        boolean allowExists = handler.getOption(GeneratorNode.EXISTS);
+        boolean allowAntiJoin = handler.getOption(GeneratorNode.ANTI_JOIN);
+        if (!allowExists && !allowAntiJoin) {
             throw new IgnoreMeException();
         }
         List<String> queryStrings = new ArrayList<>();
-        queryStrings.add(getQueryString(getJoinWithType(JoinType.INNER, null)));
-        queryStrings.add(getAntiJoinQueryString());
-        checkRelation(combine(queryStrings), false);
+        queryStrings.add(getQueryString(false, getJoinWithType(JoinType.INNER), null));
+        if (allowAntiJoin && (Randomly.getBoolean() || !allowExists)) {
+            queryStrings.add(getQueryString(true, getJoinWithType(JoinType.ANTI), null));
+        } else {
+            queryStrings.add(getExistsQueryString(true));
+        }
+        checkRelation(List.of(originalQueryString), combine(queryStrings), false);
     }
 
     private void checkFullJoin() throws SQLException {
@@ -225,7 +302,25 @@ public class GeneralJIROracle extends GeneralQueryPartitioningBase {
             checkContainsJoinType(JoinType.RIGHT);
         }
         if (state.getHandler().getOption(GeneratorNode.EXISTS)) {
-            checkRelation(List.of(getAntiJoinQueryString()), true);
+            checkRelation(List.of(getExistsQueryString(true)), List.of(originalQueryString), true);
+        }
+    }
+
+    private void checkSemiOrAntiJoin() throws SQLException {
+        GeneralErrorHandler handler = state.getHandler();
+        boolean semi = join.getJoinType() == JoinType.SEMI;
+        JoinType complement = semi ? JoinType.ANTI : JoinType.SEMI;
+        boolean allowExists = handler.getOption(GeneratorNode.EXISTS);
+        boolean allowComplement = handler.getOption(GeneratorNode.valueOf(complement.name() + "_JOIN"));
+        if (allowComplement && (Randomly.getBoolean() || !allowExists)) {
+            List<String> queryStrings = new ArrayList<>();
+            queryStrings.add(originalQueryString);
+            queryStrings.add(getQueryString(false, getJoinWithType(complement), null));
+            checkRelation(combine(queryStrings), List.of(getQueryString(false, join.getLeftTable(), null)), false);
+        } else if (allowExists) {
+            checkRelation(List.of(originalQueryString), List.of(getExistsQueryString(!semi)), false);
+        } else {
+            throw new IgnoreMeException();
         }
     }
 
@@ -245,63 +340,77 @@ public class GeneralJIROracle extends GeneralQueryPartitioningBase {
     }
 
     private void checkContainsJoinType(JoinType joinType) throws SQLException {
-        checkRelation(List.of(getQueryString(getJoinWithType(joinType, null))), true);
+        checkRelation(List.of(getQueryString(false, getJoinWithType(joinType), null)), List.of(originalQueryString),
+                true);
     }
 
     private void checkContainsNaturalJoinType(OuterType outerType) throws SQLException {
         state.getHandler().addScore(GeneratorNode.NATURAL_JOIN);
-        checkRelation(List.of(getQueryString(join.withJoinType(JoinType.NATURAL, outerType))), true);
+        checkRelation(List.of(getQueryString(false, join.withJoinType(JoinType.NATURAL, outerType), null)),
+                List.of(originalQueryString), true);
     }
 
-    private GeneralJoin getJoinWithType(JoinType joinType, OuterType outerType) {
+    private GeneralJoin getJoinWithType(JoinType joinType) {
         state.getHandler().addScore(GeneratorNode.valueOf(joinType.name() + "_JOIN"));
-        return join.withJoinType(joinType, outerType);
+        return join.withJoinType(joinType, null);
     }
 
     /**
-     * Executes the derived queries and compares their rows with those of the original query.
+     * Executes the queries of both sides and compares their rows.
      *
-     * @param queryStrings
-     *            the derived queries, whose rows are concatenated
+     * @param firstQueryStrings
+     *            the queries of the first side, whose rows are concatenated
+     * @param secondQueryStrings
+     *            the queries of the second side, whose rows are concatenated
      * @param contained
-     *            whether the rows of the derived queries are expected to be contained in those of the original query,
-     *            rather than to be the same
+     *            whether the rows of the first side are expected to be contained in those of the second side, rather
+     *            than to be the same
      */
-    private void checkRelation(List<String> queryStrings, boolean contained) throws SQLException {
+    private void checkRelation(List<String> firstQueryStrings, List<String> secondQueryStrings, boolean contained)
+            throws SQLException {
         GeneralErrorHandler handler = state.getHandler();
-        String firstQueryString = queryStrings.get(0);
-        List<String> resultSet;
+        String derivedQueryString = firstQueryStrings.get(0).equals(originalQueryString) ? secondQueryStrings.get(0)
+                : firstQueryStrings.get(0);
+        List<String> firstResultSet;
+        List<String> secondResultSet;
         try {
-            resultSet = getResultSets(queryStrings, state);
+            firstResultSet = getResultSets(firstQueryStrings, state, true);
+            secondResultSet = getResultSets(secondQueryStrings, state, true);
         } catch (Exception e) {
-            handler.appendScoreToTable(false, true, firstQueryString, e.getMessage());
+            handler.appendScoreToTable(false, true, derivedQueryString, e.getMessage());
             throw e;
         }
-        handler.appendScoreToTable(true, true, firstQueryString);
+        handler.appendScoreToTable(true, true, derivedQueryString);
         try {
-            compare(originalResultSet, resultSet, queryStrings, contained, state);
+            compare(firstResultSet, secondResultSet, firstQueryStrings, secondQueryStrings, contained, state);
         } catch (AssertionError e) {
-            reproducer = new GeneralJIRReproducer(queryStrings, contained, e.getMessage());
+            reproducer = new GeneralJIRReproducer(firstQueryStrings, secondQueryStrings, contained, e.getMessage());
             throw e;
         }
     }
 
-    private List<String> getResultSets(List<String> queryStrings, GeneralGlobalState globalState) throws SQLException {
+    private List<String> getResultSets(List<String> queryStrings, GeneralGlobalState globalState,
+            boolean reuseOriginalResultSet) throws SQLException {
         List<String> resultSet = new ArrayList<>();
         for (String queryString : queryStrings) {
-            resultSet.addAll(ComparatorHelper.getResultSetFirstColumnAsString(queryString, errors, globalState));
+            if (reuseOriginalResultSet && queryString.equals(originalQueryString)) {
+                resultSet.addAll(originalResultSet);
+            } else {
+                resultSet.addAll(ComparatorHelper.getResultSetFirstColumnAsString(queryString, errors, globalState));
+            }
         }
         return resultSet;
     }
 
-    private void compare(List<String> originalRows, List<String> derivedRows, List<String> queryStrings,
-            boolean contained, GeneralGlobalState globalState) {
+    private void compare(List<String> firstResultSet, List<String> secondResultSet, List<String> firstQueryStrings,
+            List<String> secondQueryStrings, boolean contained, GeneralGlobalState globalState) {
+        String firstQueryString = String.join(";", firstQueryStrings);
         if (contained) {
-            ComparatorHelper.assumeResultSetIsContained(derivedRows, originalRows, String.join(";", queryStrings),
-                    List.of(originalQueryString), globalState, ComparatorHelper::canonicalizeResultValue);
+            ComparatorHelper.assumeResultSetIsContained(firstResultSet, secondResultSet, firstQueryString,
+                    secondQueryStrings, globalState, ComparatorHelper::canonicalizeResultValue);
         } else {
-            ComparatorHelper.assumeResultSetsAreEqual(originalRows, derivedRows, originalQueryString, queryStrings,
-                    globalState, ComparatorHelper::canonicalizeResultValue);
+            ComparatorHelper.assumeResultSetsAreEqual(firstResultSet, secondResultSet, firstQueryString,
+                    secondQueryStrings, globalState, ComparatorHelper::canonicalizeResultValue);
         }
     }
 
@@ -312,41 +421,47 @@ public class GeneralJIROracle extends GeneralQueryPartitioningBase {
         return queryStrings;
     }
 
-    private String getQueryString(GeneralJoin replacement) {
+    /**
+     * Gets a variant of the original query.
+     *
+     * @param hideRightSide
+     *            whether the fetch columns of the right side of the join are replaced by NULL
+     * @param replacement
+     *            what takes the place of the join. The place is kept, so that the operands of the other joins are
+     *            unchanged.
+     * @param whereClause
+     *            the WHERE clause of the variant, which can be null
+     *
+     * @return the variant
+     */
+    private String getQueryString(boolean hideRightSide, Node<GeneralExpression> replacement,
+            Node<GeneralExpression> whereClause) {
         List<Node<GeneralExpression>> replacedJoins = new ArrayList<>(joins);
         replacedJoins.set(joinIndex, replacement);
-        select.setJoinList(replacedJoins);
-        String queryString = GeneralToStringVisitor.asString(select);
-        select.setJoinList(joins);
-        return queryString;
+        GeneralSelect variant = new GeneralSelect();
+        variant.setFetchColumns(getColumnReferences(hideRightSide));
+        variant.setFromList(fromList);
+        variant.setJoinList(replacedJoins);
+        variant.setWhereClause(whereClause);
+        return GeneralToStringVisitor.asString(variant);
     }
 
-    private String getAntiJoinQueryString() {
+    /**
+     * Gets the query that fetches the rows of the left side of the join for which a matching row of the right side
+     * exists, or for which none exists.
+     *
+     * @param negated
+     *            whether the rows without a match are fetched, which are those of the anti join
+     *
+     * @return the query
+     */
+    private String getExistsQueryString(boolean negated) {
         state.getHandler().addScore(GeneratorNode.EXISTS);
-        String rightName = getRightTable().getName();
-        List<Node<GeneralExpression>> antiFetchColumns = new ArrayList<>();
-        for (GeneralColumn column : fetchColumns) {
-            if (column.getTable().getName().equals(rightName)) {
-                antiFetchColumns.add(GeneralConstant.createNullConstant());
-            } else {
-                antiFetchColumns.add(new ColumnReferenceNode<GeneralExpression, GeneralColumn>(column));
-            }
-        }
         GeneralSelect subquery = new GeneralSelect();
         subquery.setFetchColumns(List.of(GeneralConstant.createIntConstant(1)));
         subquery.setFromList(List.of(join.getRightTable()));
         subquery.setWhereClause(join.getOnCondition());
-
-        // the left table takes the place of the join, so that the operands of the other joins are unchanged
-        List<Node<GeneralExpression>> antiJoins = new ArrayList<>(joins);
-        antiJoins.set(joinIndex, join.getLeftTable());
-
-        GeneralSelect antiSelect = new GeneralSelect();
-        antiSelect.setFetchColumns(antiFetchColumns);
-        antiSelect.setFromList(fromList);
-        antiSelect.setJoinList(antiJoins);
-        antiSelect.setWhereClause(new GeneralExists(subquery, true));
-        return GeneralToStringVisitor.asString(antiSelect);
+        return getQueryString(true, join.getLeftTable(), new GeneralExists(subquery, negated));
     }
 
     private GeneralTable getRightTable() {

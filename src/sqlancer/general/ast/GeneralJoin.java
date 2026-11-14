@@ -25,12 +25,15 @@ public class GeneralJoin implements Node<GeneralExpression> {
     private OuterType outerType;
 
     public enum JoinType {
-        INNER, NATURAL, LEFT, RIGHT, FULL;
+        INNER, NATURAL, LEFT, RIGHT, FULL, SEMI, ANTI;
 
+        // The right side of a semi or anti join is not visible outside the join, so that these types are only
+        // generated on request.
+        private static final List<JoinType> VALUE_VISIBLE = List.of(INNER, NATURAL, LEFT, RIGHT, FULL);
         private static final List<JoinType> VALUE_NOT_NJ = List.of(INNER, LEFT, RIGHT, FULL);
 
         public static JoinType getRandom() {
-            return Randomly.fromOptions(values());
+            return Randomly.fromList(VALUE_VISIBLE);
         }
 
         public static JoinType getRandomByOptions(GeneralErrorHandler handler) {
@@ -171,13 +174,30 @@ public class GeneralJoin implements Node<GeneralExpression> {
      */
     public static Node<GeneralExpression> getJoin(List<TableReferenceNode<GeneralExpression, GeneralTable>> tableList,
             GeneralGlobalState globalState) {
+        return getJoin(tableList, null, globalState);
+    }
+
+    /**
+     * Joins the first two tables of the list, which are removed from it.
+     *
+     * @param tableList
+     *            the tables that are not yet joined, of which there must be at least two
+     * @param joinType
+     *            the type of the join, which must not be a natural join, or null for a random type
+     * @param globalState
+     *            the global state
+     *
+     * @return the join
+     */
+    public static Node<GeneralExpression> getJoin(List<TableReferenceNode<GeneralExpression, GeneralTable>> tableList,
+            JoinType joinType, GeneralGlobalState globalState) {
         TableReferenceNode<GeneralExpression, GeneralTable> leftTable = tableList.remove(0);
         TableReferenceNode<GeneralExpression, GeneralTable> rightTable = tableList.remove(0);
         List<GeneralColumn> columns = new ArrayList<>(leftTable.getTable().getColumns());
         columns.addAll(rightTable.getTable().getColumns());
         ExpressionGenerator<Node<GeneralExpression>> joinGen = GeneralRandomQuerySynthesizer
                 .getExpressionGenerator(globalState, columns);
-        return getJoinExpression(leftTable, rightTable, joinGen, globalState);
+        return getJoinExpression(leftTable, rightTable, joinType, joinGen, globalState);
     }
 
     /**
@@ -189,6 +209,8 @@ public class GeneralJoin implements Node<GeneralExpression> {
      *            the tables that the subquery selects from
      * @param subqueryName
      *            the alias of the subquery
+     * @param joinType
+     *            the type of the join, which must not be a natural join, or null for a random type
      * @param globalState
      *            the global state
      *
@@ -196,13 +218,13 @@ public class GeneralJoin implements Node<GeneralExpression> {
      */
     public static Node<GeneralExpression> getJoinWithSubquery(
             List<TableReferenceNode<GeneralExpression, GeneralTable>> tableList, List<GeneralTable> subqueryTables,
-            String subqueryName, GeneralGlobalState globalState) {
+            String subqueryName, JoinType joinType, GeneralGlobalState globalState) {
         GeneralSubquery subquery = GeneralRandomQuerySynthesizer.generateSubquery(globalState, subqueryName,
                 new GeneralTables(subqueryTables));
         TableReferenceNode<GeneralExpression, GeneralTable> leftTable = tableList.remove(0);
         List<GeneralColumn> columns = new ArrayList<>(leftTable.getTable().getColumns());
         columns.addAll(subquery.getTable().getColumns());
-        Node<GeneralExpression> join = getJoinExpression(leftTable, subquery,
+        Node<GeneralExpression> join = getJoinExpression(leftTable, subquery, joinType,
                 GeneralRandomQuerySynthesizer.getExpressionGenerator(globalState, columns), globalState);
         globalState.getHandler().addScore(GeneratorNode.SUBQUERY);
         return join;
@@ -210,10 +232,14 @@ public class GeneralJoin implements Node<GeneralExpression> {
 
     private static Node<GeneralExpression> getJoinExpression(
             TableReferenceNode<GeneralExpression, GeneralTable> leftTable, Node<GeneralExpression> rightTable,
-            ExpressionGenerator<Node<GeneralExpression>> joinGen, GeneralGlobalState globalState) {
+            JoinType requestedJoinType, ExpressionGenerator<Node<GeneralExpression>> joinGen,
+            GeneralGlobalState globalState) {
         Node<GeneralExpression> joinExpression = null;
         JoinType joinType;
-        if (rightTable instanceof GeneralSubquery) {
+        if (requestedJoinType != null) {
+            joinType = requestedJoinType;
+            globalState.getHandler().addScore(GeneratorNode.valueOf(joinType.name() + "_JOIN"));
+        } else if (rightTable instanceof GeneralSubquery) {
             joinType = JoinType.getRandomByOptionsWithoutNJ(globalState.getHandler());
         } else {
             joinType = JoinType.getRandomByOptions(globalState.getHandler());
@@ -234,6 +260,10 @@ public class GeneralJoin implements Node<GeneralExpression> {
             break;
         case FULL:
             joinExpression = GeneralJoin.createFullOuterJoin(leftTable, rightTable, joinGen.generateExpression());
+            break;
+        case SEMI:
+        case ANTI:
+            joinExpression = new GeneralJoin(leftTable, rightTable, joinType, joinGen.generateExpression());
             break;
         default:
             throw new AssertionError();
@@ -256,7 +286,7 @@ public class GeneralJoin implements Node<GeneralExpression> {
             if (tableList.isEmpty()) {
                 return joinExpressions;
             }
-            joinExpressions.add(getJoinWithSubquery(tableList, tables, "sub" + i, globalState));
+            joinExpressions.add(getJoinWithSubquery(tableList, tables, "sub" + i, null, globalState));
         }
 
         return joinExpressions;

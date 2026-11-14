@@ -8,6 +8,7 @@ import sqlancer.general.ast.GeneralConstant;
 import sqlancer.general.ast.GeneralExists;
 import sqlancer.general.ast.GeneralExpression;
 import sqlancer.general.ast.GeneralJoin;
+import sqlancer.general.ast.GeneralJoin.JoinType;
 import sqlancer.general.ast.GeneralSelect;
 import sqlancer.general.ast.GeneralSelect.GeneralSubquery;
 
@@ -36,6 +37,12 @@ public class GeneralToStringVisitor extends NewToStringVisitor<GeneralExpression
 
     private void visit(GeneralJoin join) {
         visit(join.getLeftTable());
+        if (join.getJoinType() == JoinType.SEMI || join.getJoinType() == JoinType.ANTI) {
+            // A DBMS that lacks the join type would otherwise read its keyword as the alias of the left table, and
+            // execute an inner join.
+            sb.append(" AS ");
+            sb.append(join.getLeftTable().getTable().getName());
+        }
         sb.append(" ");
         sb.append(join.getJoinType());
         sb.append(" ");
