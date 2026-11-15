@@ -2,7 +2,9 @@ package sqlancer.general.oracle;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import sqlancer.ComparatorHelper;
@@ -37,8 +39,8 @@ import sqlancer.general.gen.GeneralRandomQuerySynthesizer;
  * <ul>
  * <li>INNER: partitioning the ON condition by a predicate, its negation, and its nullness yields the same rows.</li>
  * <li>LEFT: the rows are those of the inner join and those of the anti join.</li>
- * <li>RIGHT: the rows contain those of the inner join.</li>
- * <li>FULL: the rows contain those of the inner, left, right, and anti joins.</li>
+ * <li>RIGHT: the rows are the inner join plus the unmatched right rows.</li>
+ * <li>FULL: the rows are the inner join plus the unmatched rows of each side.</li>
  * <li>SEMI and ANTI: the rows of both joins are those of the left side of the join. The rows of each are those of the
  * left side for which a row of the right side exists, or does not exist, respectively.</li>
  * <li>NATURAL LEFT: the rows contain those of the natural inner join.</li>
@@ -102,7 +104,8 @@ public class GeneralJIROracle extends GeneralQueryPartitioningBase {
     public void check() throws SQLException {
         reproducer = null;
         generateSelect();
-        originalQueryString = GeneralToStringVisitor.asString(select);
+        originalQueryString = join.getJoinType() == JoinType.RIGHT || join.getJoinType() == JoinType.FULL
+                ? GeneralJIROuterJoinRewriter.asString(select) : GeneralToStringVisitor.asString(select);
         GeneralErrorHandler handler = state.getHandler();
         try {
             originalResultSet = ComparatorHelper.getResultSetFirstColumnAsString(originalQueryString, errors, state);
@@ -122,7 +125,7 @@ public class GeneralJIROracle extends GeneralQueryPartitioningBase {
             checkLeftJoin();
             break;
         case RIGHT:
-            checkContainsJoinType(JoinType.INNER);
+            checkRightJoin();
             break;
         case FULL:
             checkFullJoin();
@@ -293,17 +296,31 @@ public class GeneralJIROracle extends GeneralQueryPartitioningBase {
         checkRelation(List.of(originalQueryString), combine(queryStrings), false);
     }
 
+    private void checkRightJoin() throws SQLException {
+        GeneralErrorHandler handler = state.getHandler();
+        boolean allowAnti = handler.getOption(GeneratorNode.ANTI_JOIN);
+        if (!handler.getOption(GeneratorNode.INNER_JOIN) || !allowAnti && !handler.getOption(GeneratorNode.EXISTS)) {
+            throw new IgnoreMeException();
+        }
+        handler.addScore(GeneratorNode.INNER_JOIN);
+        // Prefer native B ANTI JOIN A; use the same NOT EXISTS fallback as LEFT when unavailable.
+        handler.addScore(allowAnti ? GeneratorNode.ANTI_JOIN : GeneratorNode.EXISTS);
+        checkRelation(List.of(originalQueryString),
+                combine(GeneralJIROuterJoinRewriter.rewriteRight(select, joinIndex, allowAnti)), false);
+    }
+
     private void checkFullJoin() throws SQLException {
-        checkContainsJoinType(JoinType.INNER);
-        if (state.getHandler().getOption(GeneratorNode.LEFT_JOIN)) {
-            checkContainsJoinType(JoinType.LEFT);
+        GeneralErrorHandler handler = state.getHandler();
+        if (!handler.getOption(GeneratorNode.EXISTS) || !handler.getOption(GeneratorNode.INNER_JOIN)
+                || !handler.getOption(GeneratorNode.RIGHT_JOIN) || !handler.getOption(GeneratorNode.LEFT_JOIN)) {
+            throw new IgnoreMeException();
         }
-        if (state.getHandler().getOption(GeneratorNode.RIGHT_JOIN)) {
-            checkContainsJoinType(JoinType.RIGHT);
-        }
-        if (state.getHandler().getOption(GeneratorNode.EXISTS)) {
-            checkRelation(List.of(getExistsQueryString(true)), List.of(originalQueryString), true);
-        }
+        handler.addScore(GeneratorNode.INNER_JOIN);
+        handler.addScore(GeneratorNode.EXISTS);
+        handler.addScore(GeneratorNode.RIGHT_JOIN);
+        handler.addScore(GeneratorNode.LEFT_JOIN);
+        checkRelation(List.of(originalQueryString), combine(GeneralJIROuterJoinRewriter.rewriteFull(select, joinIndex)),
+                false);
     }
 
     private void checkSemiOrAntiJoin() throws SQLException {
@@ -337,11 +354,6 @@ public class GeneralJIROracle extends GeneralQueryPartitioningBase {
                 checkContainsNaturalJoinType(OuterType.RIGHT);
             }
         }
-    }
-
-    private void checkContainsJoinType(JoinType joinType) throws SQLException {
-        checkRelation(List.of(getQueryString(false, getJoinWithType(joinType), null)), List.of(originalQueryString),
-                true);
     }
 
     private void checkContainsNaturalJoinType(OuterType outerType) throws SQLException {
@@ -411,7 +423,42 @@ public class GeneralJIROracle extends GeneralQueryPartitioningBase {
         } else {
             ComparatorHelper.assumeResultSetsAreEqual(firstResultSet, secondResultSet, firstQueryString,
                     secondQueryStrings, globalState, ComparatorHelper::canonicalizeResultValue);
+            // The shared comparator checks cardinality and distinct values, but not each value's multiplicity.
+            if (!globalState.getOptions().validateResultSizeOnly() && !sameResultBag(firstResultSet, secondResultSet)) {
+                Map<String, Long> firstCounts = resultCounts(firstResultSet);
+                Map<String, Long> secondCounts = resultCounts(secondResultSet);
+                Map<String, Long> firstResultSetMisses = new HashMap<>(secondCounts);
+                firstResultSetMisses.replaceAll((value, count) -> count - firstCounts.getOrDefault(value, 0L));
+                firstResultSetMisses.values().removeIf(count -> count <= 0);
+                Map<String, Long> secondResultSetMisses = new HashMap<>(firstCounts);
+                secondResultSetMisses.replaceAll((value, count) -> count - secondCounts.getOrDefault(value, 0L));
+                secondResultSetMisses.values().removeIf(count -> count <= 0);
+
+                String secondQueryString = String.join(";", secondQueryStrings);
+                String queryFormatString = "-- Query: \"%s\"; It misses: \"%s\"";
+                String firstQueryLog = String.format(queryFormatString, firstQueryString, firstResultSetMisses);
+                String secondQueryLog = String.format(queryFormatString, secondQueryString, secondResultSetMisses);
+                globalState.getState().getLocalState()
+                        .log(String.format("%s" + System.lineSeparator() + "%s", firstQueryLog, secondQueryLog));
+                String assertionMessage = String.format(
+                        "The content of the result sets mismatch!" + System.lineSeparator()
+                                + "First query : \"%s\"" + System.lineSeparator() + "Second query: \"%s\"",
+                        firstQueryString, secondQueryString);
+                throw new AssertionError(assertionMessage);
+            }
         }
+    }
+
+    static boolean sameResultBag(List<String> first, List<String> second) {
+        return resultCounts(first).equals(resultCounts(second));
+    }
+
+    private static Map<String, Long> resultCounts(List<String> values) {
+        Map<String, Long> counts = new HashMap<>();
+        for (String value : values) {
+            counts.merge(ComparatorHelper.canonicalizeResultValue(value), 1L, Long::sum);
+        }
+        return counts;
     }
 
     private List<String> combine(List<String> queryStrings) {
