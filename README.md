@@ -52,5 +52,5 @@ You could adjust some arguments to control the testing process. Here are some of
 
 - `--num-threads $i`: the number of threads to run the test. The default value is 4. You could set it to a higher value if you have a powerful machine and there are not so many bugs. Set to 1 if there is too many issues.
 - `--use-reducer`: enable the reducer to reduce the bug-triggering query. Do not enable it if you want to see the full SQL statements.
-- `--oracle $ORACLE`: the oracle to use. The default value is `WHERE`. You could also try `NoREC`.
+- `--oracle $ORACLE`: the oracle to use. The default value is `WHERE`. You could also try `NoREC`, or `JIR`.
 - `--use-deduplicator`: enable the bug deduplicator to reduce duplication in best effort. To enable it, add `--use-deduplicator` after `general` in the command.

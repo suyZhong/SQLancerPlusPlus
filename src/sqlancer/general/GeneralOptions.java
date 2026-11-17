@@ -19,6 +19,7 @@ import sqlancer.common.oracle.TestOracle;
 import sqlancer.general.GeneralProvider.GeneralGlobalState;
 import sqlancer.general.GeneralSchema.GeneralTable;
 import sqlancer.general.oracle.GeneralFuzzingOracle;
+import sqlancer.general.oracle.GeneralJIROracle;
 import sqlancer.general.oracle.GeneralNoRECOracle;
 import sqlancer.general.oracle.GeneralQueryPartitioningWhere;
 
@@ -131,6 +132,12 @@ public class GeneralOptions implements DBMSSpecificOptions<GeneralOptions.Genera
                 List<TestOracle<GeneralGlobalState>> oracles = new ArrayList<>();
                 oracles.add(new GeneralQueryPartitioningWhere(globalState));
                 return new CompositeTestOracle<GeneralGlobalState>(oracles, globalState);
+            }
+        },
+        JIR {
+            @Override
+            public TestOracle<GeneralGlobalState> create(GeneralGlobalState globalState) throws SQLException {
+                return new GeneralJIROracle(globalState);
             }
         },
         FUZZING {
