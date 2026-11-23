@@ -46,7 +46,10 @@ public class GeneralToStringVisitor extends NewToStringVisitor<GeneralExpression
         sb.append(" ");
         sb.append(join.getJoinType());
         sb.append(" ");
-        if (join.getOuterType() != null) {
+        if (join.getJoinType() == JoinType.FULL) {
+            // A bare FULL can be parsed as a table alias on engines without full outer joins.
+            sb.append("OUTER");
+        } else if (join.getOuterType() != null) {
             sb.append(join.getOuterType());
         }
         sb.append(" JOIN ");
